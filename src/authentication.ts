@@ -79,6 +79,12 @@ export interface AuthenticationOptions {
    */
   windowsShell?: 'cmd' | 'powershell'
   /**
+   * Set getProcessCommandLine custom function to get LeagueClientUx process information.
+   *
+   * Default: undefined
+   */
+  getProcessCommandLine?: (processName: string) => string
+  /**
    * Debug mode. Prints error information to console.
    * @internal
    */
@@ -128,6 +134,28 @@ export class ClientElevatedPermsError extends Error {
  * @throws ClientElevatedPermsError If the League Client is running as administrator and the script is not (Windows only)
  */
 export async function authenticate(options?: AuthenticationOptions): Promise<Credentials> {
+  async function getProcessCommandLine(isWindows: boolean, executionOptions: { shell?: string; }) {
+    const name = options?.name ?? DEFAULT_NAME
+
+    if (typeof options?.getProcessCommandLine === 'function') {
+      return options.getProcessCommandLine(isWindows ? `${name}.exe` : name)
+    }
+
+    let command: string
+
+    if (!isWindows) {
+      command = `ps x -o args | grep '${name}'`
+    } else if (options?.useDeprecatedWmic) {
+      command = `wmic process where caption='${name}.exe' get commandline`
+    } else {
+      command = `Get-CimInstance -Query "SELECT * from Win32_Process WHERE name LIKE '${name}.exe'" | Select-Object -ExpandProperty CommandLine`
+    }
+
+    const { stdout: rawStdout } = await exec(command, executionOptions)
+
+    return rawStdout
+  }
+
   async function tryAuthenticate() {
     const name = options?.name ?? DEFAULT_NAME
     const portRegex = /--app-port=([0-9]+)(?= *"| --)/
@@ -135,19 +163,10 @@ export async function authenticate(options?: AuthenticationOptions): Promise<Cre
     const pidRegex = /--app-pid=([0-9]+)(?= *"| --)/
     const isWindows = process.platform === 'win32'
 
-    let command: string
-    if (!isWindows) {
-      command = `ps x -o args | grep '${name}'`
-    } else if (isWindows && options?.useDeprecatedWmic === true) {
-      command = `wmic process where caption='${name}.exe' get commandline`
-    } else {
-      command = `Get-CimInstance -Query "SELECT * from Win32_Process WHERE name LIKE '${name}.exe'" | Select-Object -ExpandProperty CommandLine`
-    }
-
     const executionOptions = isWindows ? { shell: options?.windowsShell ?? ('powershell' as string) } : {}
 
     try {
-      const { stdout: rawStdout } = await exec(command, executionOptions)
+      const rawStdout = await getProcessCommandLine(isWindows, executionOptions)
       // TODO: investigate regression with calling .replace on rawStdout
       // Remove newlines from stdout
       const stdout = rawStdout.replace(/\n|\r/g, '')
