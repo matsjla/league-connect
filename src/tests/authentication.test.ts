@@ -66,7 +66,7 @@ describe('authenticating to the api', () => {
     expect(credentials?.certificate).toBeUndefined()
   })
 
-  test('authentication using get-command-line detection mode', async () => {
+  test('authentication using getProcessCommandLine option', async () => {
     const credentials = await authenticate({
       getProcessCommandLine: () => `C:/Riot Games/LeagueClientUx.exe" "--remoting-auth-token=CUSTOM_TOKEN" "--app-port=57730" "--app-pid=28900"`
     })
